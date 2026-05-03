@@ -15,7 +15,11 @@
 
 # next.js
 /.next/
+frontend/.next/
 /out/
+
+# nest / backend
+backend/dist/
 
 # production
 /build
@@ -30,12 +34,22 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# Env con secretos (mantener fuera de Git)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+frontend/.env.local
+frontend/.env
+
+# Plantillas versionadas
+!.env.example
+!**/.env.example
 
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
