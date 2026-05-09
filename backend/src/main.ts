@@ -4,6 +4,7 @@ import "reflect-metadata";
 
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 
 import { AppModule } from "./app.module";
 
@@ -39,6 +40,17 @@ async function bootstrap() {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
+
+  if (process.env.NODE_ENV !== "production") {
+    const swagger = new DocumentBuilder()
+      .setTitle("App Minutes API")
+      .setDescription("API de gestión de minutas, reuniones y compromisos")
+      .setVersion("0.1.0")
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, swagger);
+    SwaggerModule.setup("docs", app, document);
+  }
 
   const port = Number(process.env.PORT ?? 3001);
   await app.listen(port);

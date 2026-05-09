@@ -54,9 +54,11 @@ frontend/.env
 # typescript
 *.tsbuildinfo
 
-frontend/node_modules/
-backend/node_modules/
+frontend/node_modules
+backend/node_modules
 
 # Supabase CLI local artifacts
-supabase/.branches/
-supabase/.temp/
+supabase/.branches
+supabase/.temp
+# OpenAPI spec generado (ephemeral, sale de fetch al backend)
+frontend/openapi.json

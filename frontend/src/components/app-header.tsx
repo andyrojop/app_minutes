@@ -40,8 +40,11 @@ export function AppHeader({ email, role }: Props) {
   const pathname = usePathname();
 
   async function handleSignOut() {
+    // Next-Auth dispara el evento `signOut` que llama a /auth/logout y limpia la sesión JWT.
+    const { signOut } = await import("next-auth/react");
+    // Logout paralelo de Supabase mientras conviven las dos sesiones.
     const supabase = createClient();
-    await supabase.auth.signOut();
+    await Promise.allSettled([supabase.auth.signOut(), signOut({ redirect: false })]);
     router.push("/login");
     router.refresh();
   }

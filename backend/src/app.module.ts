@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
 
 import { AuditModule } from "./audit/audit.module";
+import { AuthModule } from "./auth/auth.module";
 import { CommitmentsModule } from "./commitments/commitments.module";
 import { CommonModule } from "./common/common.module";
 import { HealthModule } from "./health/health.module";
@@ -49,6 +50,7 @@ import { UsersModule } from "./users/users.module";
       inject: [ConfigService],
     }),
     CommonModule,
+    AuthModule,
     HealthModule,
     MeetingsModule,
     MinutesModule,
