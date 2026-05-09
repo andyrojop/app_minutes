@@ -9,7 +9,7 @@ import type { Request } from "express";
 import { createClient } from "@supabase/supabase-js";
 
 import { APP_ROLE } from "../common/app-role";
-import { resolveEffectiveAppRole } from "../common/resolve-request-role";
+import { RoleResolverService } from "../common/role-resolver.service";
 
 export type RequestUser = { sub: string; email?: string };
 
@@ -52,6 +52,8 @@ function isAdminMfaExempt(method: string, path: string): boolean {
 
 @Injectable()
 export class SupabaseAuthGuard implements CanActivate {
+  constructor(private readonly roleResolver: RoleResolverService) {}
+
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const header = req.headers.authorization;
@@ -85,7 +87,7 @@ export class SupabaseAuthGuard implements CanActivate {
       const path = httpPath(req);
       const method = (req.method ?? "GET").toUpperCase();
       if (adminRequiresAal2Env() && !isAdminMfaExempt(method, path)) {
-        const role = await resolveEffectiveAppRole(token, user.id);
+        const role = await this.roleResolver.resolve(token, user.id);
         if (role === APP_ROLE.ADMIN && jwtAal(token) !== "aal2") {
           throw new ForbiddenException(
             "Los administradores deben completar la verificación en dos pasos (TOTP). Usa la pantalla de seguridad de la aplicación.",

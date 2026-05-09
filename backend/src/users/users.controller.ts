@@ -23,8 +23,8 @@ export class UsersController {
   @Get()
   @UseGuards(RolesGuard)
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
-  list(@Req() req: AuthedRequest) {
-    return this.users.list(req.accessToken);
+  list() {
+    return this.users.list();
   }
 
   /** Alta de cuenta: solo Administrador (ERS). Requiere MFA AAL2 si aplica. */
@@ -32,7 +32,7 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles(APP_ROLE.ADMIN)
   invite(@Req() req: AuthedRequest, @Body() dto: InviteUserDto) {
-    return this.users.invite(req.accessToken, req.user.sub, dto);
+    return this.users.invite(req.user.sub, dto);
   }
 
   @Patch(":id")
@@ -43,6 +43,6 @@ export class UsersController {
     @Param("id") id: string,
     @Body() dto: PatchUserRoleDto,
   ) {
-    return this.users.patch(req.accessToken, req.user.sub, id, dto);
+    return this.users.patch(req.user.sub, id, dto);
   }
 }

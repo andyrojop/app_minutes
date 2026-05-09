@@ -10,23 +10,9 @@ export function createAnonSupabaseClient(): SupabaseClient {
   return createClient(url, anon);
 }
 
-export function createUserScopedClient(accessToken: string): SupabaseClient {
-  const url = process.env.SUPABASE_URL;
-  const anon = process.env.SUPABASE_ANON_KEY;
-  if (!url || !anon) {
-    throw new Error("SUPABASE_URL o SUPABASE_ANON_KEY no configurados");
-  }
-  return createClient(url, anon, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    },
-  });
-}
-
 /**
- * Solo servidor. Omite RLS: usar únicamente después de validar el JWT y solo para filas del usuario autenticado.
+ * Solo servidor. Cliente con la `service_role` key; usado únicamente para `auth.admin.*`
+ * (alta de usuarios desde el panel admin). Las operaciones de datos van por TypeORM.
  */
 export function tryCreateServiceRoleSupabaseClient(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL?.trim();

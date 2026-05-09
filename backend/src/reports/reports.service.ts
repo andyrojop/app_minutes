@@ -1,36 +1,47 @@
 import { Injectable } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
 
 import { CommitmentsService } from "../commitments/commitments.service";
-import { createUserScopedClient } from "../supabase/supabase";
+import { Commitment } from "../models/commitment.entity";
+import { Meeting } from "../models/meeting.entity";
+import { Minute } from "../models/minute.entity";
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly commitments: CommitmentsService) {}
+  constructor(
+    private readonly commitments: CommitmentsService,
+    @InjectRepository(Meeting) private readonly meetingsRepo: Repository<Meeting>,
+    @InjectRepository(Minute) private readonly minutesRepo: Repository<Minute>,
+    @InjectRepository(Commitment) private readonly commitmentsRepo: Repository<Commitment>,
+  ) {}
 
   async dashboard(accessToken: string) {
     await this.commitments.expireOverdue(accessToken);
-    const sb = createUserScopedClient(accessToken);
 
-    const [meetings, commitments, minutes, statusRows] = await Promise.all([
-      sb.from("meetings").select("*", { count: "exact", head: true }),
-      sb.from("commitments").select("*", { count: "exact", head: true }),
-      sb.from("minutes").select("*", { count: "exact", head: true }),
-      sb.from("commitments").select("status"),
+    const [meetingsCount, commitmentsCount, minutesCount, byStatus] = await Promise.all([
+      this.meetingsRepo.count(),
+      this.commitmentsRepo.count(),
+      this.minutesRepo.count(),
+      this.commitmentsRepo
+        .createQueryBuilder("c")
+        .select("c.status", "status")
+        .addSelect("COUNT(*)", "count")
+        .groupBy("c.status")
+        .getRawMany<{ status: string | null; count: string }>(),
     ]);
 
-    if (statusRows.error) throw new Error(statusRows.error.message);
-
     const tally: Record<string, number> = {};
-    for (const row of statusRows.data ?? []) {
-      const s = (row as { status?: string }).status ?? "sin_estado";
-      tally[s] = (tally[s] ?? 0) + 1;
+    for (const row of byStatus) {
+      const key = row.status ?? "sin_estado";
+      tally[key] = Number(row.count);
     }
 
     return {
       totals: {
-        meetings: meetings.count ?? 0,
-        commitments: commitments.count ?? 0,
-        minutes: minutes.count ?? 0,
+        meetings: meetingsCount,
+        commitments: commitmentsCount,
+        minutes: minutesCount,
       },
       commitments_by_status: tally,
     };

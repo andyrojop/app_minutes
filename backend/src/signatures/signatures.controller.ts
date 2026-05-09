@@ -14,8 +14,8 @@ export class SignaturesController {
   constructor(private readonly signatures: SignaturesService) {}
 
   @Get("minute/:minuteId")
-  listByMinute(@Req() req: AuthedRequest, @Param("minuteId") minuteId: string) {
-    return this.signatures.listByMinute(req.accessToken, minuteId);
+  listByMinute(@Param("minuteId") minuteId: string) {
+    return this.signatures.listByMinute(minuteId);
   }
 
   @Post()
@@ -26,6 +26,6 @@ export class SignaturesController {
       (typeof req.ip === "string" && req.ip) ||
       (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
       null;
-    return this.signatures.create(req.accessToken, req.user.sub, dto, ip);
+    return this.signatures.create(req.user.sub, dto, ip);
   }
 }

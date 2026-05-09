@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -24,14 +25,17 @@ export class MinutesController {
   constructor(private readonly minutes: MinutesService) {}
 
   @Get("meeting/:meetingId")
-  listByMeeting(@Req() req: AuthedRequest, @Param("meetingId") meetingId: string) {
-    return this.minutes.listByMeeting(req.accessToken, meetingId);
+  listByMeeting(
+    @Req() req: AuthedRequest,
+    @Param("meetingId", new ParseUUIDPipe()) meetingId: string,
+  ) {
+    return this.minutes.listByMeeting(req.accessToken, req.user.sub, meetingId);
   }
 
   @Post(":id/start-signing")
   @UseGuards(RolesGuard)
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
-  startSigning(@Req() req: AuthedRequest, @Param("id") id: string) {
+  startSigning(@Req() req: AuthedRequest, @Param("id", new ParseUUIDPipe()) id: string) {
     return this.minutes.startSigning(req.accessToken, req.user.sub, id);
   }
 
@@ -40,21 +44,21 @@ export class MinutesController {
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
   updateDraft(
     @Req() req: AuthedRequest,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateMinuteDraftDto,
   ) {
-    return this.minutes.updateDraft(req.accessToken, req.user.sub, id, dto);
+    return this.minutes.updateDraft(req.user.sub, id, dto);
   }
 
   @Get(":id")
-  getOne(@Req() req: AuthedRequest, @Param("id") id: string) {
-    return this.minutes.getById(req.accessToken, id);
+  getOne(@Req() req: AuthedRequest, @Param("id", new ParseUUIDPipe()) id: string) {
+    return this.minutes.getById(req.accessToken, req.user.sub, id);
   }
 
   @Post()
   @UseGuards(RolesGuard)
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
   create(@Req() req: AuthedRequest, @Body() dto: CreateMinuteDto) {
-    return this.minutes.create(req.accessToken, req.user.sub, dto);
+    return this.minutes.create(req.user.sub, dto);
   }
 }

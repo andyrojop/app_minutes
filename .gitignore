@@ -53,3 +53,10 @@ frontend/.env
 
 # typescript
 *.tsbuildinfo
+
+frontend/node_modules/
+backend/node_modules/
+
+# Supabase CLI local artifacts
+supabase/.branches/
+supabase/.temp/

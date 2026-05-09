@@ -1,142 +1,159 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
 
 import type { CreateMinuteDto } from "./dto/create-minute.dto";
 import type { UpdateMinuteDraftDto } from "./dto/update-minute-draft.dto";
 import { AuditService } from "../audit/audit.service";
-import { APP_ROLE } from "../common/app-role";
-import { resolveEffectiveAppRole } from "../common/resolve-request-role";
-import { MeetingsService } from "../meetings/meetings.service";
-import {
-  createUserScopedClient,
-  tryCreateServiceRoleSupabaseClient,
-} from "../supabase/supabase";
-import { throwIfSupabaseError } from "../supabase/throw-if-supabase-error";
+import { APP_ROLE, type AppRole } from "../common/app-role";
+import { RoleResolverService } from "../common/role-resolver.service";
+import { Meeting } from "../models/meeting.entity";
+import { MeetingAttendee } from "../models/meeting-attendee.entity";
+import { Minute, MinuteStatusEnum } from "../models/minute.entity";
+
+const STAFF_ROLES: AppRole[] = [APP_ROLE.ADMIN, APP_ROLE.SECRETARY];
+const VIEWER_ROLES = ["admin", "secretary", "auditor"] as const;
+
+function isStaff(role: AppRole | null): boolean {
+  return role !== null && STAFF_ROLES.includes(role);
+}
+
+function isViewer(role: AppRole | null): boolean {
+  return role !== null && (VIEWER_ROLES as readonly string[]).includes(role);
+}
+
+function toIso(d: Date | string | null | undefined): string | null {
+  if (!d) return null;
+  return d instanceof Date ? d.toISOString() : d;
+}
+
+type MinuteDto = {
+  id: string;
+  meeting_id: string;
+  content: unknown;
+  version: number;
+  status: string;
+  content_hash: string | null;
+  signed_pdf_url: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+function toMinuteDto(m: Minute & { meeting?: unknown }): MinuteDto {
+  const meetingId =
+    typeof m.meeting === "string" ? m.meeting : (m.meeting as { id?: string })?.id ?? "";
+  return {
+    id: m.id,
+    meeting_id: meetingId,
+    content: m.content,
+    version: m.version,
+    status: m.status,
+    content_hash: m.contentHash,
+    signed_pdf_url: m.signedPdfUrl,
+    created_at: toIso(m.createdAt),
+    updated_at: toIso(m.updatedAt),
+  };
+}
 
 @Injectable()
 export class MinutesService {
   constructor(
+    @InjectRepository(Minute) private readonly minutes: Repository<Minute>,
+    @InjectRepository(Meeting) private readonly meetings: Repository<Meeting>,
+    @InjectRepository(MeetingAttendee)
+    private readonly attendees: Repository<MeetingAttendee>,
     private readonly audit: AuditService,
-    private readonly meetings: MeetingsService,
+    private readonly roleResolver: RoleResolverService,
   ) {}
 
-  async listByMeeting(accessToken: string, meetingId: string) {
-    const userSb = createUserScopedClient(accessToken);
-    const { data, error } = await userSb
-      .from("minutes")
-      .select("*")
-      .eq("meeting_id", meetingId)
-      .order("created_at", { ascending: false });
-    throwIfSupabaseError(error);
-    let rows = data ?? [];
-
-    if (rows.length === 0) {
-      try {
-        await this.meetings.getById(accessToken, meetingId);
-      } catch {
-        return rows;
-      }
-      const admin = tryCreateServiceRoleSupabaseClient();
-      if (admin) {
-        const r = await admin
-          .from("minutes")
-          .select("*")
-          .eq("meeting_id", meetingId)
-          .order("created_at", { ascending: false });
-        if (!r.error && r.data?.length) rows = r.data;
-      }
-    }
-
-    return rows;
+  /** True si el usuario puede VER el contenido del meeting (organizer, asistente o staff/auditor). */
+  private async canAccessMeeting(
+    userId: string,
+    role: AppRole | null,
+    meetingId: string,
+  ): Promise<boolean> {
+    if (isViewer(role)) return true;
+    const meeting = await this.meetings.findOne({
+      where: { id: meetingId },
+      loadRelationIds: { relations: ["organizer"] },
+    });
+    if (!meeting) return false;
+    const organizerId =
+      typeof meeting.organizer === "string"
+        ? meeting.organizer
+        : (meeting.organizer as { id?: string })?.id;
+    if (organizerId === userId) return true;
+    return this.attendees.exist({
+      where: { meetingId, userId },
+    });
   }
 
-  async getById(accessToken: string, id: string) {
-    const userSb = createUserScopedClient(accessToken);
-    let { data, error } = await userSb.from("minutes").select("*").eq("id", id).maybeSingle();
-    throwIfSupabaseError(error);
-
-    if (!data) {
-      const { data: authData } = await userSb.auth.getUser();
-      const uid = authData?.user?.id;
-      const admin = tryCreateServiceRoleSupabaseClient();
-      if (admin && uid) {
-        const r = await admin.from("minutes").select("*").eq("id", id).maybeSingle();
-        if (!r.error && r.data) {
-          const meetingId = (r.data as { meeting_id: string }).meeting_id;
-          const m = await admin.from("meetings").select("organizer_id").eq("id", meetingId).maybeSingle();
-          const organizerId = (m.data as { organizer_id: string } | null)?.organizer_id;
-          const isOrganizer = organizerId === uid;
-          let isAttendee = false;
-          if (!isOrganizer) {
-            const att = await admin
-              .from("meeting_attendees")
-              .select("meeting_id")
-              .eq("meeting_id", meetingId)
-              .eq("user_id", uid)
-              .maybeSingle();
-            isAttendee = !!att.data;
-          }
-          if (isOrganizer || isAttendee) {
-            data = r.data;
-          } else {
-            const appRole = await resolveEffectiveAppRole(accessToken, uid);
-            if (appRole === APP_ROLE.ADMIN || appRole === APP_ROLE.SECRETARY) {
-              data = r.data;
-            }
-          }
-        }
-      }
-    }
-
-    if (!data) throw new NotFoundException("Minuta no encontrada");
-    return data;
+  async listByMeeting(
+    accessToken: string,
+    userId: string,
+    meetingId: string,
+  ): Promise<MinuteDto[]> {
+    const role = await this.roleResolver.resolve(accessToken, userId);
+    const canAccess = await this.canAccessMeeting(userId, role, meetingId);
+    if (!canAccess) return [];
+    const rows = await this.minutes.find({
+      where: { meeting: { id: meetingId } },
+      loadRelationIds: { relations: ["meeting"] },
+      order: { createdAt: "DESC" },
+    });
+    return rows.map(toMinuteDto);
   }
 
-  async create(accessToken: string, actorId: string, dto: CreateMinuteDto) {
-    await this.meetings.getById(accessToken, dto.meeting_id);
+  async getById(accessToken: string, userId: string, id: string): Promise<MinuteDto> {
+    const minute = await this.minutes.findOne({
+      where: { id },
+      loadRelationIds: { relations: ["meeting"] },
+    });
+    if (!minute) throw new NotFoundException("Minuta no encontrada");
 
-    const insertPayload = {
-      meeting_id: dto.meeting_id,
-      content: {
-        agenda: "",
-        desarrollo: "",
-        acuerdos: "",
-        observaciones: "",
-      },
-      status: "DRAFT",
-      version: 1,
-    };
+    const meetingId =
+      typeof minute.meeting === "string"
+        ? minute.meeting
+        : (minute.meeting as { id?: string })?.id ?? "";
+    const role = await this.roleResolver.resolve(accessToken, userId);
+    const canAccess = await this.canAccessMeeting(userId, role, meetingId);
+    if (!canAccess) throw new NotFoundException("Minuta no encontrada");
+    return toMinuteDto(minute);
+  }
 
-    const userSb = createUserScopedClient(accessToken);
-    let { data: inserted, error } = await userSb.from("minutes").insert(insertPayload).select("id").single();
+  async create(actorId: string, dto: CreateMinuteDto) {
+    const meetingExists = await this.meetings.exist({ where: { id: dto.meeting_id } });
+    if (!meetingExists) throw new NotFoundException("Reunión no encontrada");
 
-    if (
-      error &&
-      /row-level security|violates row-level security|permission denied for table/i.test(error.message)
-    ) {
-      const admin = tryCreateServiceRoleSupabaseClient();
-      if (admin) {
-        ({ data: inserted, error } = await admin.from("minutes").insert(insertPayload).select("id").single());
-      }
-    }
+    const inserted = await this.minutes.save(
+      this.minutes.create({
+        meeting: { id: dto.meeting_id } as Meeting,
+        content: {
+          agenda: "",
+          desarrollo: "",
+          acuerdos: "",
+          observaciones: "",
+        },
+        version: 1,
+        status: MinuteStatusEnum.Draft,
+      }),
+    );
 
-    throwIfSupabaseError(error);
-    if (!inserted?.id) throw new BadRequestException("No se pudo crear la minuta.");
-
-    await this.audit.append(accessToken, actorId, {
+    await this.audit.append(actorId, {
       action: "minute.create",
       resource_type: "minute",
       resource_id: inserted.id,
     });
 
-    return inserted;
+    return { id: inserted.id };
   }
 
-  async updateDraft(accessToken: string, actorId: string, id: string, dto: UpdateMinuteDraftDto) {
-    const supabase = createUserScopedClient(accessToken);
+  async updateDraft(actorId: string, id: string, dto: UpdateMinuteDraftDto) {
     const content = {
       agenda: dto.agenda ?? "",
       desarrollo: dto.desarrollo ?? "",
@@ -144,54 +161,17 @@ export class MinutesService {
       observaciones: dto.observaciones ?? "",
     };
 
-    let {
-      data: updated,
-      error,
-    } = await supabase
-      .from("minutes")
-      .update({ content })
-      .eq("id", id)
-      .eq("status", "DRAFT")
-      .select("id");
-
-    if (
-      error &&
-      /row-level security|violates row-level security|permission denied for table/i.test(error.message)
-    ) {
-      const admin = tryCreateServiceRoleSupabaseClient();
-      if (admin) {
-        ({ data: updated, error } = await admin
-          .from("minutes")
-          .update({ content })
-          .eq("id", id)
-          .eq("status", "DRAFT")
-          .select("id"));
-      }
-    }
-
-    throwIfSupabaseError(error);
-
-    if (!updated?.length) {
-      const admin = tryCreateServiceRoleSupabaseClient();
-      if (admin) {
-        const r2 = await admin
-          .from("minutes")
-          .update({ content })
-          .eq("id", id)
-          .eq("status", "DRAFT")
-          .select("id");
-        throwIfSupabaseError(r2.error);
-        updated = r2.data;
-      }
-    }
-
-    if (!updated?.length) {
+    const result = await this.minutes.update(
+      { id, status: MinuteStatusEnum.Draft },
+      { content },
+    );
+    if (!result.affected) {
       throw new BadRequestException(
-        "No se guardó el borrador (0 filas). Revisa que la minuta siga en DRAFT, migración 007 y SUPABASE_SERVICE_ROLE_KEY si RLS bloquea el JWT.",
+        "No se guardó el borrador. Verifica que la minuta exista y siga en estado DRAFT.",
       );
     }
 
-    await this.audit.append(accessToken, actorId, {
+    await this.audit.append(actorId, {
       action: "minute.update_draft",
       resource_type: "minute",
       resource_id: id,
@@ -200,68 +180,36 @@ export class MinutesService {
     return { ok: true };
   }
 
-  /** RF-02.5 / RF-02.6 — pasa a EN_FIRMA (SIGNING); contenido bloqueado por reglas de negocio posteriores. */
+  /** RF-02.5 / RF-02.6 — pasa a EN_FIRMA (SIGNING); contenido bloqueado por trigger inmutabilidad. */
   async startSigning(accessToken: string, actorId: string, minuteId: string) {
-    const sb = createUserScopedClient(accessToken);
+    const minute = await this.minutes.findOne({
+      where: { id: minuteId },
+    });
+    if (!minute) throw new NotFoundException("Minuta no encontrada");
 
-    // Misma visibilidad que GET /minutes/:id (fallback service role + organizador/convocado).
-    const row = await this.getById(accessToken, minuteId);
-    const st = String(row.status ?? "");
-    if (st === "SIGNING") {
+    const role = await this.roleResolver.resolve(accessToken, actorId);
+    if (!isStaff(role)) {
+      throw new ForbiddenException("Solo administración o secretaría puede pasar a firma.");
+    }
+
+    if (minute.status === MinuteStatusEnum.Signing) {
       return { ok: true, alreadySigning: true as const };
     }
-    if (st !== "DRAFT") {
+    if (minute.status !== MinuteStatusEnum.Draft) {
       throw new BadRequestException(
-        `No se puede pasar a firma desde el estado «${st}». Solo se permite con borrador (DRAFT).`,
+        `No se puede pasar a firma desde el estado «${minute.status}». Solo se permite con borrador (DRAFT).`,
       );
     }
 
-    const tryServiceUpdate = () => {
-      const admin = tryCreateServiceRoleSupabaseClient();
-      if (!admin) return Promise.resolve({ data: null as { id: string }[] | null, error: null });
-      return admin
-        .from("minutes")
-        .update({ status: "SIGNING" })
-        .eq("id", minuteId)
-        .eq("status", "DRAFT")
-        .select("id");
-    };
-
-    let {
-      data: updated,
-      error,
-    } = await sb
-      .from("minutes")
-      .update({ status: "SIGNING" })
-      .eq("id", minuteId)
-      .eq("status", "DRAFT")
-      .select("id");
-
-    if (
-      error &&
-      /row-level security|violates row-level security|permission denied for table/i.test(error.message)
-    ) {
-      const r = await tryServiceUpdate();
-      updated = r.data as typeof updated;
-      error = r.error;
+    const result = await this.minutes.update(
+      { id: minuteId, status: MinuteStatusEnum.Draft },
+      { status: MinuteStatusEnum.Signing },
+    );
+    if (!result.affected) {
+      throw new BadRequestException("No se pudo cambiar el estado de la minuta.");
     }
 
-    throwIfSupabaseError(error);
-
-    if (!updated?.length) {
-      const r = await tryServiceUpdate();
-      throwIfSupabaseError(r.error);
-      updated = r.data as typeof updated;
-    }
-
-    if (!updated?.length) {
-      throw new BadRequestException(
-        "Supabase no actualizó la minuta (0 filas). Suele pasar si RLS no reconoce tu rol: en public.users tu fila debe tener role = secretary, o en el JWT user_metadata.app_role = secretary, y debe existir la migración 006 (has_any_app_role). " +
-          "Solución rápida en desarrollo: SUPABASE_SERVICE_ROLE_KEY en backend/.env y reiniciar el backend.",
-      );
-    }
-
-    await this.audit.append(accessToken, actorId, {
+    await this.audit.append(actorId, {
       action: "minute.start_signing",
       resource_type: "minute",
       resource_id: minuteId,

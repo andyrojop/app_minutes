@@ -7,13 +7,16 @@ import {
 import { Reflector } from "@nestjs/core";
 
 import type { AuthedRequest } from "../../auth/supabase-auth.guard";
-import { ROLES_KEY } from "../decorators/roles.decorator";
 import type { AppRole } from "../app-role";
-import { resolveEffectiveAppRole } from "../resolve-request-role";
+import { ROLES_KEY } from "../decorators/roles.decorator";
+import { RoleResolverService } from "../role-resolver.service";
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly roleResolver: RoleResolverService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const required = this.reflector.getAllAndOverride<AppRole[]>(ROLES_KEY, [
@@ -23,7 +26,7 @@ export class RolesGuard implements CanActivate {
     if (!required?.length) return true;
 
     const req = context.switchToHttp().getRequest<AuthedRequest>();
-    const role = await resolveEffectiveAppRole(req.accessToken, req.user.sub);
+    const role = await this.roleResolver.resolve(req.accessToken, req.user.sub);
     if (!role || !required.includes(role)) {
       throw new ForbiddenException(
         "No tienes permiso para esta acción. Comprueba tu rol en «Usuarios» (admin/secretary), que public.users esté sincronizado y reinicia el backend tras actualizar.",

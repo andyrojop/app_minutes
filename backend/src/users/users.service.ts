@@ -4,90 +4,88 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
 
 import type { InviteUserDto } from "./dto/invite-user.dto";
 import type { PatchUserRoleDto } from "./dto/patch-user-role.dto";
 import { AuditService } from "../audit/audit.service";
 import { roleFromSupabaseUser } from "../common/resolve-request-role";
+import { User, UserRoleEnum } from "../models/user.entity";
 import {
-  createUserScopedClient,
+  createAnonSupabaseClient,
   tryCreateServiceRoleSupabaseClient,
 } from "../supabase/supabase";
+
+const USER_FIELDS = ["id", "email", "role", "isActive", "createdAt"] as const;
+
+type UserDto = {
+  id: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+};
+
+function toDto(u: User): UserDto {
+  return {
+    id: u.id,
+    email: u.email,
+    role: u.role,
+    is_active: u.isActive,
+    created_at: u.createdAt instanceof Date ? u.createdAt.toISOString() : String(u.createdAt),
+  };
+}
+
+function asRoleEnum(value: string): UserRoleEnum {
+  switch (value) {
+    case UserRoleEnum.Admin:
+    case UserRoleEnum.Secretary:
+    case UserRoleEnum.Auditor:
+      return value;
+    default:
+      return UserRoleEnum.Secretary;
+  }
+}
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    @InjectRepository(User) private readonly users: Repository<User>,
+    private readonly audit: AuditService,
+  ) {}
 
-  async me(accessToken: string, userId: string) {
-    const sb = createUserScopedClient(accessToken);
-
-    const { data: authData, error: authErr } = await sb.auth.getUser();
+  async me(accessToken: string, userId: string): Promise<UserDto> {
+    // Lectura del JWT (Supabase Auth) para refrescar email + extraer rol del metadata.
+    const anon = createAnonSupabaseClient();
+    const { data: authData, error: authErr } = await anon.auth.getUser(accessToken);
     if (authErr || !authData?.user) {
       throw new Error(authErr?.message ?? "Sesión inválida");
     }
     const authUser = authData.user;
-
-    let { data, error } = await sb
-      .from("users")
-      .select("id, email, role, is_active, created_at")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (error) throw new Error(error.message);
-
     const metaRole = roleFromSupabaseUser(authUser);
 
-    // Sin fila visible en SELECT (o fila aún no existe): upsert evita carrera y duplicate key (23505).
-    // Políticas: INSERT propio (005) + UPDATE propio (`users_update_self`).
-    if (!data) {
-      const resolved = metaRole ?? "secretary";
-      const row = {
-        id: userId,
-        email: authUser.email ?? "",
-        role: resolved,
-      };
+    const existing = await this.users.findOne({
+      where: { id: userId },
+      select: USER_FIELDS as unknown as (keyof User)[],
+    });
 
-      const admin = tryCreateServiceRoleSupabaseClient();
-
-      const { error: jwtUpsertErr } = await sb.from("users").upsert(row, { onConflict: "id" });
-      if (jwtUpsertErr) {
-        this.logger.warn(`users.me bootstrap upsert (jwt): ${jwtUpsertErr.message}`);
-        if (!admin) {
-          this.logger.warn(
-            "Sin SUPABASE_SERVICE_ROLE_KEY en backend/.env el servidor no puede escribir en public.users ni crear reuniones si RLS lo bloquea. Copia la clave «service_role» en Settings → API, reinicia el backend; o ejecuta la migración SQL 005 en Supabase.",
-          );
-        }
-      }
-
-      let refetch = await sb
-        .from("users")
-        .select("id, email, role, is_active, created_at")
-        .eq("id", userId)
-        .maybeSingle();
-      if (refetch.error) throw new Error(refetch.error.message);
-      if (refetch.data) return refetch.data;
-
-      if (admin) {
-        const sr = await admin.from("users").upsert(row, { onConflict: "id" });
-        if (sr.error) this.logger.warn(`users.me bootstrap upsert (service): ${sr.error.message}`);
-        refetch = await sb
-          .from("users")
-          .select("id, email, role, is_active, created_at")
-          .eq("id", userId)
-          .maybeSingle();
-        if (!refetch.error && refetch.data) return refetch.data;
-        const svcRow = await admin
-          .from("users")
-          .select("id, email, role, is_active, created_at")
-          .eq("id", userId)
-          .maybeSingle();
-        if (svcRow.data) return svcRow.data;
-      }
-
-      // RLS puede impedir SELECT pero la fila existe (p. ej. políticas desfasadas): no tumbar el perfil.
-      this.logger.warn("users.me: sin lectura de fila tras upsert; respondiendo desde JWT/metadata.");
+    if (!existing) {
+      // Bootstrap: crea fila si el trigger no llegó a sincronizarla aún.
+      const resolved = asRoleEnum(metaRole ?? UserRoleEnum.Secretary);
+      await this.users.upsert(
+        { id: userId, email: authUser.email ?? "", role: resolved, isActive: true },
+        ["id"],
+      );
+      const created = await this.users.findOne({
+        where: { id: userId },
+        select: USER_FIELDS as unknown as (keyof User)[],
+      });
+      if (created) return toDto(created);
+      // Defensa final: responder desde JWT si la fila aún no es legible.
+      this.logger.warn("users.me: fila no legible tras upsert; respondiendo desde JWT.");
       return {
         id: userId,
         email: authUser.email ?? "",
@@ -97,46 +95,25 @@ export class UsersService {
       };
     }
 
-    const roleMissing = !data.role || String(data.role).trim() === "";
+    const roleMissing = !existing.role || String(existing.role).trim() === "";
     if (roleMissing) {
-      const resolvedRole = metaRole ?? "secretary";
-      let { error: upErr } = await sb.from("users").update({ role: resolvedRole }).eq("id", userId);
-      if (upErr) {
-        this.logger.warn(`users.me sync role (jwt): ${upErr.message}`);
-        const admin = tryCreateServiceRoleSupabaseClient();
-        if (admin) {
-          const u2 = await admin.from("users").update({ role: resolvedRole }).eq("id", userId);
-          if (u2.error) this.logger.warn(`users.me sync role (service): ${u2.error.message}`);
-        }
-      }
-
-      let again = await sb
-        .from("users")
-        .select("id, email, role, is_active, created_at")
-        .eq("id", userId)
-        .maybeSingle();
-      if (!again.error && again.data) data = again.data;
-      else {
-        const svcRead = tryCreateServiceRoleSupabaseClient();
-        if (svcRead) {
-          again = await svcRead
-            .from("users")
-            .select("id, email, role, is_active, created_at")
-            .eq("id", userId)
-            .maybeSingle();
-          if (again.data) data = again.data;
-        }
-      }
+      const resolved = asRoleEnum(metaRole ?? UserRoleEnum.Secretary);
+      await this.users.update({ id: userId }, { role: resolved });
+      const refreshed = await this.users.findOne({
+        where: { id: userId },
+        select: USER_FIELDS as unknown as (keyof User)[],
+      });
+      if (refreshed) return toDto(refreshed);
     }
 
-    return data;
+    return toDto(existing);
   }
 
   /**
    * Alta de usuario vía Supabase Admin (solo con service role).
-   * Dispara `handle_new_user` → `public.users`; el upsert cubre carreras con el trigger.
+   * Dispara `handle_new_user` → `public.users`; el trigger crea la fila automáticamente.
    */
-  async invite(accessToken: string, actorId: string, dto: InviteUserDto) {
+  async invite(actorId: string, dto: InviteUserDto) {
     const svc = tryCreateServiceRoleSupabaseClient();
     if (!svc) {
       throw new BadRequestException(
@@ -162,15 +139,14 @@ export class UsersService {
       throw new BadRequestException("No se obtuvo el identificador del usuario creado.");
     }
 
-    const { error: syncErr } = await svc.from("users").upsert(
-      { id: uid, email, role: dto.role },
-      { onConflict: "id" },
+    // El trigger on_auth_user_created ya insertó la fila en public.users.
+    // Solo aseguramos que el rol sea exactamente el solicitado (por si la metadata difiere).
+    await this.users.upsert(
+      { id: uid, email, role: asRoleEnum(dto.role), isActive: true },
+      ["id"],
     );
-    if (syncErr) {
-      this.logger.warn(`users.invite sync public.users: ${syncErr.message}`);
-    }
 
-    await this.audit.append(accessToken, actorId, {
+    await this.audit.append(actorId, {
       action: "user.invite",
       resource_type: "user",
       resource_id: uid,
@@ -179,27 +155,22 @@ export class UsersService {
     return { id: uid, email };
   }
 
-  async list(accessToken: string) {
-    const sb = createUserScopedClient(accessToken);
-    const { data, error } = await sb
-      .from("users")
-      .select("id, email, role, is_active, created_at")
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return data ?? [];
+  async list(): Promise<UserDto[]> {
+    const rows = await this.users.find({
+      order: { createdAt: "DESC" },
+      select: USER_FIELDS as unknown as (keyof User)[],
+    });
+    return rows.map(toDto);
   }
 
-  async patch(accessToken: string, actorId: string, userId: string, dto: PatchUserRoleDto) {
-    const sb = createUserScopedClient(accessToken);
-    const patch: Record<string, unknown> = { role: dto.role };
-    if (dto.is_active !== undefined) patch.is_active = dto.is_active;
+  async patch(actorId: string, userId: string, dto: PatchUserRoleDto) {
+    const patch: Partial<User> = { role: asRoleEnum(dto.role) };
+    if (dto.is_active !== undefined) patch.isActive = dto.is_active;
 
-    const { data, error } = await sb.from("users").update(patch).eq("id", userId).select("id").maybeSingle();
+    const result = await this.users.update({ id: userId }, patch);
+    if (!result.affected) throw new NotFoundException("Usuario no encontrado");
 
-    if (error) throw new Error(error.message);
-    if (!data) throw new NotFoundException("Usuario no encontrado");
-
-    await this.audit.append(accessToken, actorId, {
+    await this.audit.append(actorId, {
       action: "user.role_update",
       resource_type: "user",
       resource_id: userId,

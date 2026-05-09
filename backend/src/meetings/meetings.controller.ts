@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -27,19 +28,19 @@ export class MeetingsController {
 
   @Get()
   list(@Req() req: AuthedRequest) {
-    return this.meetings.list(req.accessToken);
+    return this.meetings.list(req.accessToken, req.user.sub);
   }
 
   @Get(":id/attendees")
-  attendees(@Req() req: AuthedRequest, @Param("id") id: string) {
-    return this.meetings.listAttendees(req.accessToken, id);
+  attendees(@Param("id", new ParseUUIDPipe()) id: string) {
+    return this.meetings.listAttendees(id);
   }
 
   @Patch(":id")
   @UseGuards(RolesGuard)
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
-  update(@Req() req: AuthedRequest, @Param("id") id: string, @Body() dto: UpdateMeetingDto) {
-    return this.meetings.update(req.accessToken, req.user.sub, id, dto);
+  update(@Req() req: AuthedRequest, @Param("id", new ParseUUIDPipe()) id: string, @Body() dto: UpdateMeetingDto) {
+    return this.meetings.update(req.user.sub, id, dto);
   }
 
   @Post(":id/attendees")
@@ -47,10 +48,10 @@ export class MeetingsController {
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
   addAttendee(
     @Req() req: AuthedRequest,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
     @Body() dto: AddAttendeeDto,
   ) {
-    return this.meetings.addAttendee(req.accessToken, req.user.sub, id, dto);
+    return this.meetings.addAttendee(req.user.sub, id, dto);
   }
 
   @Delete(":id/attendees/:userId")
@@ -58,28 +59,28 @@ export class MeetingsController {
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
   removeAttendee(
     @Req() req: AuthedRequest,
-    @Param("id") id: string,
-    @Param("userId") userId: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("userId", new ParseUUIDPipe()) userId: string,
   ) {
-    return this.meetings.removeAttendee(req.accessToken, req.user.sub, id, userId);
+    return this.meetings.removeAttendee(req.user.sub, id, userId);
   }
 
   @Delete(":id")
   @UseGuards(RolesGuard)
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
-  remove(@Req() req: AuthedRequest, @Param("id") id: string) {
-    return this.meetings.remove(req.accessToken, req.user.sub, id);
+  remove(@Req() req: AuthedRequest, @Param("id", new ParseUUIDPipe()) id: string) {
+    return this.meetings.remove(req.user.sub, id);
   }
 
   @Get(":id")
-  getOne(@Req() req: AuthedRequest, @Param("id") id: string) {
-    return this.meetings.getById(req.accessToken, id);
+  getOne(@Req() req: AuthedRequest, @Param("id", new ParseUUIDPipe()) id: string) {
+    return this.meetings.getById(req.accessToken, req.user.sub, id);
   }
 
   @Post()
   @UseGuards(RolesGuard)
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
   create(@Req() req: AuthedRequest, @Body() dto: CreateMeetingDto) {
-    return this.meetings.create(req.accessToken, req.user.sub, dto);
+    return this.meetings.create(req.user.sub, dto);
   }
 }

@@ -39,7 +39,7 @@ export class CommitmentsController {
   @UseGuards(RolesGuard)
   @Roles(APP_ROLE.ADMIN, APP_ROLE.SECRETARY)
   create(@Req() req: AuthedRequest, @Body() dto: CreateCommitmentDto) {
-    return this.commitments.create(req.accessToken, req.user.sub, dto);
+    return this.commitments.create(req.user.sub, dto);
   }
 
   @Patch(":id")
