@@ -10,8 +10,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { patchCommitmentAction } from "@/app/(protected)/actions";
-import { serverApiJson } from "@/lib/api/server-api";
+import { listMyCommitments, patchCommitmentAction } from "@/actions/commitments";
 import { getMyRole } from "@/lib/session-role";
 import { canSeeMyCommitmentsNav } from "@/lib/roles";
 import type { CommitmentRow } from "@/types/database";
@@ -24,8 +23,7 @@ export default async function MyCommitmentsPage() {
   let rows: CommitmentRow[] = [];
   let err: string | null = null;
   try {
-    const data = await serverApiJson<CommitmentRow[]>("/commitments/me");
-    rows = Array.isArray(data) ? data : [];
+    rows = await listMyCommitments();
   } catch (e) {
     err = e instanceof Error ? e.message : "No se pudo cargar.";
   }

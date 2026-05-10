@@ -10,7 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { API_CONNECTION_FAILED_MESSAGE, serverApiJson } from "@/lib/api/server-api";
+import { listCommitments } from "@/actions/commitments";
+import { API_CONNECTION_FAILED_MESSAGE } from "@/lib/api/errors";
 import { getMyRole } from "@/lib/session-role";
 import { canSecretaryOperate } from "@/lib/roles";
 import type { CommitmentRow } from "@/types/database";
@@ -21,8 +22,7 @@ export default async function CommitmentsPage() {
   let rows: CommitmentRow[] = [];
   let err: string | null = null;
   try {
-    const data = await serverApiJson<CommitmentRow[]>("/commitments");
-    rows = Array.isArray(data) ? data : [];
+    rows = await listCommitments();
   } catch (e) {
     err = e instanceof Error ? e.message : "No se pudo cargar.";
   }

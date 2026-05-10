@@ -12,7 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { createMeetingAction } from "../../actions";
+import { createMeetingAction } from "@/actions/meetings";
 import { getMyRole } from "@/lib/session-role";
 import { canCreateMeeting } from "@/lib/roles";
 

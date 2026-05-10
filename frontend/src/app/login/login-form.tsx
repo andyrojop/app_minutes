@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { isInviteOnlyMode } from "@/lib/env";
-import { createClient } from "@/lib/supabase/client";
 import { humanizeSupabaseAuthError } from "@/lib/supabase-auth-errors";
 import { resolveSafePostLoginRedirect } from "@/lib/post-login-redirect";
 
@@ -31,24 +30,14 @@ export function LoginForm() {
     setError(null);
     setLoading(true);
     try {
-      // 1. Next-Auth (para el cliente OpenAPI con Bearer token).
-      const nextAuthResult = await signIn("credentials", {
+      const result = await signIn("credentials", {
         email,
         password,
         redirect: false,
       });
-      if (!nextAuthResult || nextAuthResult.error) {
-        setError(humanizeSupabaseAuthError(nextAuthResult?.error ?? "Credenciales inválidas"));
+      if (!result || result.error) {
+        setError(humanizeSupabaseAuthError(result?.error ?? "Credenciales inválidas"));
         return;
-      }
-
-      // 2. Supabase cookies SSR (para páginas/components que aún usan createClient).
-      // Mientras se migra el frontend gradualmente, ambas sesiones conviven.
-      const supabase = createClient();
-      const { error: sbError } = await supabase.auth.signInWithPassword({ email, password });
-      if (sbError) {
-        // No bloqueamos el login: Next-Auth ya está activo. Solo log para debug.
-        console.warn("[login] supabase signIn paralelo falló:", sbError.message);
       }
 
       router.push(nextPath);

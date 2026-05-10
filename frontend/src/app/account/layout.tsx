@@ -3,14 +3,11 @@ import { redirect } from "next/navigation";
 
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/auth/get-session";
 
 export default async function AccountLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const session = await getSession();
+  if (!session?.user) redirect("/login");
 
   return (
     <div className="bg-muted/30 flex min-h-full flex-col">

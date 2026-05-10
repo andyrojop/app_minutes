@@ -10,7 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { API_CONNECTION_FAILED_MESSAGE, serverApiJson } from "@/lib/api/server-api";
+import { listMeetings } from "@/actions/meetings";
+import { API_CONNECTION_FAILED_MESSAGE } from "@/lib/api/errors";
 import { getMyRole } from "@/lib/session-role";
 import { canCreateMeeting } from "@/lib/roles";
 import { cn } from "@/lib/utils";
@@ -21,8 +22,7 @@ export default async function MeetingsPage() {
   let rows: MeetingRow[] = [];
   let loadError: string | null = null;
   try {
-    const data = await serverApiJson<MeetingRow[]>("/meetings");
-    rows = Array.isArray(data) ? data : [];
+    rows = await listMeetings();
   } catch (e) {
     loadError = e instanceof Error ? e.message : "No se pudo cargar la lista.";
   }

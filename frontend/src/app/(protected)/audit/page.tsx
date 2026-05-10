@@ -7,19 +7,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { serverApiJson } from "@/lib/api/server-api";
+import { listAuditLog } from "@/actions/audit";
 import { getMyRole } from "@/lib/session-role";
 import { canViewAudit } from "@/lib/roles";
-
-type AuditRow = {
-  id: string;
-  actor_id: string | null;
-  action: string | null;
-  resource_type: string | null;
-  resource_id: string | null;
-  ip: string | null;
-  created_at: string;
-};
+import type { AuditRow } from "@/types/database";
 
 export default async function AuditPage() {
   const role = await getMyRole();
@@ -28,8 +19,7 @@ export default async function AuditPage() {
   let rows: AuditRow[] = [];
   let err: string | null = null;
   try {
-    const data = await serverApiJson<AuditRow[]>("/audit-log");
-    rows = Array.isArray(data) ? data : [];
+    rows = await listAuditLog();
   } catch (e) {
     err = e instanceof Error ? e.message : "Error";
   }

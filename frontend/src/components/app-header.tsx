@@ -20,7 +20,6 @@ import {
   roleLabel,
 } from "@/lib/roles";
 import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
 import { ChevronDown, LogOut } from "lucide-react";
 
 type Props = {
@@ -40,11 +39,8 @@ export function AppHeader({ email, role }: Props) {
   const pathname = usePathname();
 
   async function handleSignOut() {
-    // Next-Auth dispara el evento `signOut` que llama a /auth/logout y limpia la sesión JWT.
     const { signOut } = await import("next-auth/react");
-    // Logout paralelo de Supabase mientras conviven las dos sesiones.
-    const supabase = createClient();
-    await Promise.allSettled([supabase.auth.signOut(), signOut({ redirect: false })]);
+    await signOut({ redirect: false });
     router.push("/login");
     router.refresh();
   }

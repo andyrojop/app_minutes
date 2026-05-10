@@ -12,8 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { updateMeetingAction } from "@/app/(protected)/actions";
-import { serverApiJson } from "@/lib/api/server-api";
+import { getMeeting, updateMeetingAction } from "@/actions/meetings";
 import { getMyRole } from "@/lib/session-role";
 import { canSecretaryOperate } from "@/lib/roles";
 import type { MeetingRow } from "@/types/database";
@@ -28,7 +27,7 @@ export default async function MeetingEditPage({ params }: Props) {
 
   let m!: MeetingRow;
   try {
-    m = await serverApiJson<MeetingRow>(`/meetings/${id}`);
+    m = await getMeeting(id);
   } catch {
     notFound();
   }

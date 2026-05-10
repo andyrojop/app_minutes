@@ -12,17 +12,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import {
-  createCommitmentAction,
-  startMinuteSigningAction,
-  updateMinuteDraftAction,
-} from "@/app/(protected)/actions";
+import { listCommitments, createCommitmentAction } from "@/actions/commitments";
+import { getMeeting } from "@/actions/meetings";
+import { getMinute, startMinuteSigningAction, updateMinuteDraftAction } from "@/actions/minutes";
+import { listSignaturesByMinute } from "@/actions/signatures";
+import { listUsers } from "@/actions/users";
 import { SignaturesGallery } from "@/components/signature/signatures-gallery";
 import { TopazSignatureForm } from "@/components/signature/topaz-signature-form";
-import { serverApiJson } from "@/lib/api/server-api";
 import { getMyRole } from "@/lib/session-role";
 import { canSecretaryOperate, canSign } from "@/lib/roles";
-import type { CommitmentRow, MeetingRow, MinuteRow, SignatureRow, UserRow } from "@/types/database";
+import type { MeetingRow, MinuteRow, UserRow } from "@/types/database";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -38,7 +37,7 @@ export default async function MinuteEditorPage({ params, searchParams }: Props) 
 
   let min!: MinuteRow;
   try {
-    min = await serverApiJson<MinuteRow>(`/minutes/${id}`);
+    min = await getMinute(id);
   } catch {
     notFound();
   }
@@ -47,35 +46,17 @@ export default async function MinuteEditorPage({ params, searchParams }: Props) 
 
   let meet: MeetingRow | null = null;
   try {
-    meet = await serverApiJson<MeetingRow>(`/meetings/${min.meeting_id}`);
+    meet = await getMeeting(min.meeting_id);
   } catch {
     meet = null;
   }
 
-  let commitments: CommitmentRow[] = [];
-  try {
-    const list = await serverApiJson<CommitmentRow[]>(`/commitments?minute_id=${min.id}`);
-    commitments = Array.isArray(list) ? list : [];
-  } catch {
-    commitments = [];
-  }
-
-  let signatures: SignatureRow[] = [];
-  try {
-    const sigs = await serverApiJson<SignatureRow[]>(`/signatures/minute/${id}`);
-    signatures = Array.isArray(sigs) ? sigs : [];
-  } catch {
-    signatures = [];
-  }
+  const commitments = await listCommitments(min.id).catch(() => []);
+  const signatures = await listSignaturesByMinute(id).catch(() => []);
 
   let usersList: UserRow[] = [];
   if (staff) {
-    try {
-      const u = await serverApiJson<UserRow[]>("/users");
-      usersList = Array.isArray(u) ? u : [];
-    } catch {
-      usersList = [];
-    }
+    usersList = await listUsers().catch(() => []);
   }
 
   const assigneeLabel = (uid: string | null) => {

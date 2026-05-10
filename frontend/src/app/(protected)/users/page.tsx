@@ -11,8 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { inviteUserAction, updateUserRoleAction } from "@/app/(protected)/actions";
-import { serverApiJson } from "@/lib/api/server-api";
+import { inviteUserAction, listUsers, updateUserRoleAction } from "@/actions/users";
 import { getMyRole } from "@/lib/session-role";
 import { canManageUsers, roleLabel } from "@/lib/roles";
 import type { UserRow } from "@/types/database";
@@ -33,8 +32,7 @@ export default async function UsersAdminPage({ searchParams }: Props) {
   let rows: UserRow[] = [];
   let err: string | null = null;
   try {
-    const data = await serverApiJson<UserRow[]>("/users");
-    rows = Array.isArray(data) ? data : [];
+    rows = await listUsers();
   } catch (e) {
     err = e instanceof Error ? e.message : "Error";
   }

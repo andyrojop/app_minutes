@@ -15,21 +15,16 @@ import { cn } from "@/lib/utils";
 import {
   addMeetingAttendeeAction,
   cancelMeetingAction,
-  createMinuteAction,
   deleteMeetingAction,
+  getMeeting,
+  listMeetingAttendees,
   removeMeetingAttendeeAction,
-} from "@/app/(protected)/actions";
-import { serverApiJson } from "@/lib/api/server-api";
+} from "@/actions/meetings";
+import { createMinuteAction, listMinutesByMeeting } from "@/actions/minutes";
+import { listUsers } from "@/actions/users";
 import { getMyRole } from "@/lib/session-role";
 import { canSecretaryOperate } from "@/lib/roles";
 import type { MeetingRow, MinuteRow, UserRow } from "@/types/database";
-
-type AttendeeRow = {
-  meeting_id: string;
-  user_id: string;
-  role: string | null;
-  attended: boolean | null;
-};
 
 type Props = { params: Promise<{ id: string }>; searchParams?: Promise<{ cancelada?: string }> };
 
@@ -40,7 +35,7 @@ export default async function MeetingDetailPage({ params, searchParams }: Props)
 
   let m!: MeetingRow;
   try {
-    m = await serverApiJson<MeetingRow>(`/meetings/${id}`);
+    m = await getMeeting(id);
   } catch {
     notFound();
   }
@@ -50,27 +45,16 @@ export default async function MeetingDetailPage({ params, searchParams }: Props)
 
   let minuteRows: MinuteRow[] = [];
   try {
-    minuteRows = await serverApiJson<MinuteRow[]>(`/minutes/meeting/${id}`);
+    minuteRows = await listMinutesByMeeting(id);
   } catch {
     minuteRows = [];
   }
 
-  let attendees: AttendeeRow[] = [];
-  try {
-    attendees = await serverApiJson<AttendeeRow[]>(`/meetings/${id}/attendees`);
-    if (!Array.isArray(attendees)) attendees = [];
-  } catch {
-    attendees = [];
-  }
+  let attendees = await listMeetingAttendees(id).catch(() => []);
 
   let usersList: UserRow[] = [];
   if (staff) {
-    try {
-      const u = await serverApiJson<UserRow[]>("/users");
-      usersList = Array.isArray(u) ? u : [];
-    } catch {
-      usersList = [];
-    }
+    usersList = await listUsers().catch(() => []);
   }
 
   const emailOf = (uid: string) => usersList.find((x) => x.id === uid)?.email ?? uid.slice(0, 8) + "…";

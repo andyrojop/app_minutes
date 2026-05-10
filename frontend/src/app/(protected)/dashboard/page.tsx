@@ -9,8 +9,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { serverApiJson } from "@/lib/api/server-api";
-import { createClient } from "@/lib/supabase/server";
+import { getMyProfile } from "@/actions/users";
+import { getSession } from "@/lib/auth/get-session";
 import { getMyRole } from "@/lib/session-role";
 import {
   canManageSystemSettings,
@@ -23,20 +23,10 @@ import {
 } from "@/lib/roles";
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+  const session = await getSession();
+  if (!session?.user) return null;
 
-  type ProfileRow = { role?: string; email?: string | null };
-  let profile: ProfileRow | null = null;
-  try {
-    profile = await serverApiJson<ProfileRow | null>("/users/me");
-  } catch {
-    profile = null;
-  }
-
+  const profile = await getMyProfile();
   const role = await getMyRole();
 
   return (
@@ -58,7 +48,7 @@ export default async function DashboardPage() {
           <CardContent className="space-y-1 text-sm">
             <p>
               <span className="text-muted-foreground">Correo </span>
-              <span className="font-medium">{profile?.email ?? user.email ?? "—"}</span>
+              <span className="font-medium">{profile?.email ?? session.user.email ?? "—"}</span>
             </p>
             <p>
               <span className="text-muted-foreground">Rol </span>

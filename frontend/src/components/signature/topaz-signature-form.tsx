@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { registerSignatureAction } from "@/app/(protected)/actions";
+import { registerSignatureAction } from "@/actions/signatures";
 import { buttonVariants } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {

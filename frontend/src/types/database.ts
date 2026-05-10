@@ -56,3 +56,18 @@ export type SignatureRow = {
   metadata: Record<string, unknown> | null;
   signer_email: string | null;
 };
+
+export type AuditRow = {
+  id: string;
+  actor_id: string | null;
+  action: string | null;
+  resource_type: string | null;
+  resource_id: string | null;
+  ip: string | null;
+  created_at: string;
+};
+
+export type ReportsDashboard = {
+  totals: { meetings: number; commitments: number; minutes: number };
+  commitments_by_status: Record<string, number>;
+};

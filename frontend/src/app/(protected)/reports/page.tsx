@@ -7,23 +7,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { serverApiJson } from "@/lib/api/server-api";
+import { getReportsDashboard } from "@/actions/reports";
 import { getMyRole } from "@/lib/session-role";
 import { canViewReports } from "@/lib/roles";
-
-type Dashboard = {
-  totals: { meetings: number; commitments: number; minutes: number };
-  commitments_by_status: Record<string, number>;
-};
+import type { ReportsDashboard } from "@/types/database";
 
 export default async function ReportsPage() {
   const role = await getMyRole();
   if (!canViewReports(role)) redirect("/dashboard");
 
-  let data: Dashboard | null = null;
+  let data: ReportsDashboard | null = null;
   let err: string | null = null;
   try {
-    data = await serverApiJson<Dashboard>("/reports/dashboard");
+    data = await getReportsDashboard();
   } catch (e) {
     err = e instanceof Error ? e.message : "Error";
   }
